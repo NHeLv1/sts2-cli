@@ -455,6 +455,9 @@ public class RunSimulator
                 var list = GetBackingList<RelicModel>(player, "_relics");
                 if (list != null)
                 {
+                    var directRelicSetup =
+                        args.TryGetValue("relic_setup_mode", out var modeEl)
+                        && string.Equals(modeEl.GetString(), "direct", StringComparison.OrdinalIgnoreCase);
                     list.Clear();
                     foreach (var rEl in relicsEl.EnumerateArray())
                     {
@@ -463,10 +466,17 @@ public class RunSimulator
                         var model = ModelDb.GetById<RelicModel>(new ModelId("RELIC", id));
                         if (model != null)
                         {
-                            RelicCmd.Obtain(model.ToMutable(), player, player.Relics.Count)
-                                .GetAwaiter()
-                                .GetResult();
-                            _syncCtx.Pump();
+                            if (directRelicSetup)
+                            {
+                                player.AddRelicInternal(model.ToMutable(), player.Relics.Count, silent: true);
+                            }
+                            else
+                            {
+                                RelicCmd.Obtain(model.ToMutable(), player, player.Relics.Count)
+                                    .GetAwaiter()
+                                    .GetResult();
+                                _syncCtx.Pump();
+                            }
                         }
                     }
                 }
@@ -1974,6 +1984,7 @@ public class RunSimulator
             _pendingCardSelectionSourceRoomOption = null;
             _pendingCardSelectionSourcePotion = null;
             _syncCtx.Pump();
+            WaitForPendingEventOptionTask();
             WaitForActionExecutor();
             if (_runState?.CurrentRoom is MerchantRoom)
                 WaitForPendingShopPurchaseTask();
@@ -4524,16 +4535,97 @@ public class RunSimulator
 
     private string? ResolveHoverTipText(object rawTip, string memberName)
     {
-        var text = TryGetMember(rawTip, memberName) as string;
+        var rawText = TryGetMember(rawTip, memberName);
+        var vars = ExportHoverTipVars(rawTip);
+        if (rawText is LocString locString)
+            return ResolveLocString(locString, vars);
+
+        var text = rawText as string;
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
         var staticTip = _loc.Bilingual("static_hover_tips", text);
         if (staticTip != text)
-            return CleanEngineText(staticTip);
+            return CleanResolvedEngineText(InterpolateDynamicVars(staticTip, vars) ?? staticTip);
 
         var resolved = _loc.BilingualFromKey(text);
-        return CleanEngineText(string.IsNullOrWhiteSpace(resolved) ? text : resolved);
+        var formatted = string.IsNullOrWhiteSpace(resolved) ? text : resolved;
+        return CleanResolvedEngineText(InterpolateDynamicVars(formatted, vars) ?? formatted);
+    }
+
+    private static Dictionary<string, object?>? ExportHoverTipVars(object rawTip)
+    {
+        var vars = new Dictionary<string, object?>();
+        MergeVars(vars, ExportDynamicVars(rawTip));
+
+        foreach (var prop in rawTip.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (prop.GetIndexParameters().Length != 0)
+                continue;
+            object? value;
+            try { value = prop.GetValue(rawTip); }
+            catch { continue; }
+            AddHoverTipVar(vars, prop.Name, value);
+        }
+
+        foreach (var field in rawTip.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance))
+        {
+            object? value;
+            try { value = field.GetValue(rawTip); }
+            catch { continue; }
+            AddHoverTipVar(vars, field.Name, value);
+        }
+
+        return vars.Count > 0 ? vars : null;
+    }
+
+    private static void AddHoverTipVar(
+        Dictionary<string, object?> vars,
+        string memberName,
+        object? value)
+    {
+        if (value == null)
+            return;
+
+        if (value is LocString locString)
+        {
+            MergeVars(vars, ExportLocStringVariables(locString));
+            return;
+        }
+
+        if (value is DynamicVar dynamicVar)
+        {
+            var name = dynamicVar.Name;
+            if (!string.IsNullOrWhiteSpace(name))
+                vars[name] = ExportLocStringVariableValue(dynamicVar);
+            return;
+        }
+
+        if (value is CardModel card)
+        {
+            MergeVars(vars, ExportCardDescriptionVars(card, includePreviewStats: true));
+            return;
+        }
+
+        if (value is string)
+            return;
+
+        if (value is bool or int or long or short or byte or float or double or decimal)
+        {
+            vars[memberName] = value;
+            return;
+        }
+
+        var baseValue = value.GetType().GetProperty("BaseValue")?.GetValue(value);
+        if (baseValue is string or bool or int or long or short or byte or float or double or decimal)
+        {
+            vars[memberName] = baseValue;
+            return;
+        }
+
+        var amount = value.GetType().GetProperty("Amount")?.GetValue(value);
+        if (amount is string or bool or int or long or short or byte or float or double or decimal)
+            vars[memberName] = amount;
     }
 
     private Dictionary<string, object?>? BuildRelicTradePreview(
@@ -8071,6 +8163,7 @@ public class RunSimulator
         PatchQueenPresentation();
         PatchDecimillipedePresentation();
         PatchSlumberingBeetlePresentation();
+        PatchLagavulinMatriarchPresentation();
         PatchTestSubjectPresentation();
         PatchKaiserCrabPresentation();
         PatchCrystalSpherePresentation();
@@ -8489,6 +8582,26 @@ public class RunSimulator
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] Failed to patch Slumbering Beetle sleep presentation: {ex.Message}");
+        }
+    }
+
+    private static void PatchLagavulinMatriarchPresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.lagavulinmatriarch.presentation");
+            var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.LagavulinMatriarchAfterAddedToRoomPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var afterAdded = AccessTools.Method("MegaCrit.Sts2.Core.Models.Monsters.LagavulinMatriarch:AfterAddedToRoom");
+            if (prefix == null || afterAdded == null)
+                return;
+
+            harmony.Patch(afterAdded, new HarmonyMethod(prefix));
+            Console.Error.WriteLine("[INFO] Patched Lagavulin Matriarch sleep presentation");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch Lagavulin Matriarch sleep presentation: {ex.Message}");
         }
     }
 
@@ -9020,6 +9133,19 @@ public class RunSimulator
 
             await PowerCmd.Apply<PlatingPower>(monster.Creature, platingAmount, monster.Creature, null);
             await PowerCmd.Apply<SlumberPower>(monster.Creature, 3m, monster.Creature, null);
+        }
+
+        /// <summary>Harmony prefix: preserve Lagavulin Matriarch setup powers while skipping sleep audio/VFX nodes.</summary>
+        public static bool LagavulinMatriarchAfterAddedToRoomPrefix(MonsterModel __instance, ref Task __result)
+        {
+            __result = LagavulinMatriarchAfterAddedToRoomHeadless(__instance);
+            return false;
+        }
+
+        private static async Task LagavulinMatriarchAfterAddedToRoomHeadless(MonsterModel monster)
+        {
+            await PowerCmd.Apply<PlatingPower>(monster.Creature, 12m, monster.Creature, null);
+            await PowerCmd.Apply<AsleepPower>(monster.Creature, 3m, monster.Creature, null);
         }
 
         /// <summary>Harmony prefix: preserve Test Subject's growl effects while skipping room VFX/audio/animation.</summary>

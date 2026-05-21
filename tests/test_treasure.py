@@ -1,5 +1,7 @@
 """Regression tests for treasure room relic handling."""
 
+from conftest import run_headless_jsonl
+
 
 def relic_count(state):
     return len(state.get("player", {}).get("relics", []))
@@ -106,3 +108,27 @@ def test_empty_treasure_from_silver_crucible_is_explicit_and_proceeds(game):
 
     assert state["decision"] == "map_select"
     assert [r["id"] for r in state["player"]["relics"]] == ["SILVER_CRUCIBLE"]
+
+
+def test_direct_relic_setup_does_not_block_on_pickup_selection_relics():
+    result, outputs = run_headless_jsonl(
+        [
+            {"cmd": "start_run", "seed": "direct-astrolabe-setup"},
+            {
+                "cmd": "set_player",
+                "hp": 999,
+                "max_hp": 999,
+                "deck": ["STRIKE_IRONCLAD", "DEFEND_IRONCLAD", "BASH"],
+                "relics": ["ASTROLABE"],
+                "relic_setup_mode": "direct",
+            },
+            {"cmd": "enter_room", "type": "combat", "encounter": "SHRINKER_BEETLE_WEAK"},
+            {"cmd": "quit"},
+        ],
+        timeout=15,
+    )
+
+    assert result.returncode == 0
+    assert outputs[2]["type"] == "ok"
+    assert [r["id"] for r in outputs[2]["player"]["relics"]] == ["ASTROLABE"]
+    assert outputs[3]["decision"] == "combat_play"

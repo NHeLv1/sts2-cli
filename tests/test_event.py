@@ -101,6 +101,20 @@ class TestNeowEvent:
         assert state["max_select"] == 1
         assert state["can_skip"] is True
 
+    def test_neow_optional_relic_card_select_skip_resumes_event_task(self, game):
+        state = game.start(character="Regent", ascension=5, seed="real-natural-regent-a5-en")
+        game.set_player(hp=999, max_hp=999, gold=999)
+        lead_paperweight = next(o for o in state["options"] if o["title"] == "Lead Paperweight")
+
+        state = game.act("choose_option", option_index=lead_paperweight["index"])
+
+        assert state["decision"] == "card_select"
+        assert state["can_skip"] is True
+
+        state = game.act("skip_select")
+
+        assert state["decision"] == "map_select"
+
 
 class TestEventDescriptions:
     def test_no_ismultiplayer_tag(self, game):

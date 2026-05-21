@@ -1402,6 +1402,20 @@ class TestCombatEdgeCases:
         assert "NullReferenceException" not in result.stderr
         assert "SlumberingBeetle.AfterAddedToRoom" not in result.stderr
 
+    def test_lagavulin_matriarch_sleep_setup_does_not_log_headless_exception(self):
+        result, outputs = run_headless_jsonl([
+            {"cmd": "start_run", "character": "Ironclad", "seed": "lagavulin-matriarch-stderr", "lang": "en"},
+            {"cmd": "set_player", "hp": 9999, "max_hp": 9999},
+            {"cmd": "enter_room", "type": "combat", "encounter": "LAGAVULIN_MATRIARCH_BOSS"},
+            {"cmd": "quit"},
+        ])
+
+        assert result.returncode == 0
+        assert outputs[-2]["type"] == "decision"
+        assert outputs[-2]["decision"] == "combat_play"
+        assert "NullReferenceException" not in result.stderr
+        assert "LagavulinMatriarch.AfterAddedToRoom" not in result.stderr
+
     def test_rolling_boulder_turn_start_does_not_log_headless_connect_exception(self):
         session = HeadlessSession()
         stderr = ""

@@ -85,6 +85,34 @@ class TestCharacterMechanics:
         assert not any(tip.get("id") == "ROOM_ENEMY" for tip in tips)
         assert not any(tip.get("title") == "Enemy" for tip in tips)
 
+    def test_necrobinder_inky_hover_tip_resolves_dynamic_values(self, game):
+        state = game.start(character="Necrobinder", seed="necrobinder-inky-hover-tip")
+        game.skip_neow(state)
+        game.set_player(
+            relics=[],
+            deck=[
+                "BLADE_OF_INK",
+                "STRIKE_NECROBINDER",
+                "DEFEND_NECROBINDER",
+                "DEFEND_NECROBINDER",
+                "DEFEND_NECROBINDER",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        blade = next(c for c in state["hand"] if c["name"] == "Blade of Ink")
+        tips = blade.get("hover_tips") or []
+        inky = next(tip for tip in tips if tip.get("title") == "Inky")
+
+        assert "{Damage}" not in inky["description"]
+        assert "{WeakPower}" not in inky["description"]
+        assert "additional damage" in inky["description"]
+
+        state = game.act("play_card", card_index=blade["index"])
+        shiv = next(c for c in state["hand"] if c["id"] == "CARD.SHIV")
+        assert "INKY.extraCardText" not in shiv["description"]
+        assert "Apply 1 Weak." in shiv["description"]
+
     def test_regent_has_stars(self, game):
         state = game.start(character="Regent", seed="dm2")
         game.skip_neow(state)

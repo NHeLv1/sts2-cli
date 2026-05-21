@@ -67,6 +67,7 @@
   "ILIKESHINY.description": "Amassed [blue]25[/blue] or more relics.",
   "ILIKESHINY.title": "I Like Shiny",
   "INKY.description": "This card deals [blue]{Damage}[/blue] additional damage and applies [blue]{WeakPower}[/blue] [gold]Weak[/gold].",
+  "INKY.extraCardText": "Apply [blue]{WeakPower}[/blue] [gold]Weak[/gold]{TargetType:choose(AllEnemies): to ALL enemies|}.",
   "INKY.title": "Inky",
   "IRONCLAD_ASCENSION10.description": "Beat Ascension 10 as the Ironclad.",
   "IRONCLAD_ASCENSION10.title": "Demon",
